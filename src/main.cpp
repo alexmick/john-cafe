@@ -14,6 +14,12 @@
 #include <MFRC522.h>
 
 void playSound();
+void ackBeep();
+
+long lastNFCRead = 0;
+#define TIME_BTW_READS 1000 /* Minimum time btw reads im ms */
+
+void dump_byte_array(byte *buffer, byte bufferSize, char *uidAsString);
  
 // NFC reader pin configuration
 constexpr uint8_t RST_PIN = D2;
@@ -21,7 +27,7 @@ constexpr uint8_t SS_PIN = D8;
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);  // Create MFRC522 instance
 
-int buzzPin = 5; // Buzzer pin
+int buzzPin = D1; // Buzzer pin
 
 //define your default values here, if there are different values in config.json, they are overwritten.
 char backend_server[200];
@@ -38,6 +44,7 @@ void saveConfigCallback () {
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
+  //Serial.setDebugOutput(true);
   Serial.println("==== JOHN CAFE ====");
 
   //clean FS, for testing
@@ -150,6 +157,7 @@ void setup() {
   mfrc522.PCD_Init();		// Init MFRC522
   mfrc522.PCD_DumpVersionToSerial();	// Show details of PCD - MFRC522 Card Reader details
 
+  playSound();
 }
 
 void loop() {
@@ -163,20 +171,54 @@ void loop() {
 		return;
     }
 
-    mfrc522.PICC_DumpToSerial(&(mfrc522.uid));
+  if(millis() - lastNFCRead < TIME_BTW_READS)
+    return;
 
-    // HTTPClient http;
+  lastNFCRead = millis();
+  ackBeep();
 
-    // char uid[20];
-    // http.begin();
+    //mfrc522.PICC_DumpToSerial(&(mfrc522.uid));
 
-    // int httpCode = http.GET();
+  char uidAsString[30];
+  dump_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size, uidAsString);
 
-    playSound();
+  Serial.print("New uid : ");
+  Serial.println(uidAsString);
+
+
+  HTTPClient http;
+
+  char url[200] = "";
+  strcat(url, backend_server);
+  strcat(url, "?id=");
+  strcat(url, uidAsString);
+
+  http.begin(url, "coucou");
+
+  int httpCode = http.GET();
+  Serial.print("Return code : ");
+  Serial.println(httpCode);
+
+  if(httpCode < 0 || httpCode >= 400) {
+    tone(buzzPin, 660, 1000);
+  }
+  
+  // String payload = http.getString();
+  // Serial.println(payload);
+
+  http.end();
+
+    
+}
+
+void ackBeep() {
+  tone(buzzPin, 510, 100);
+  delay(100);
+  tone(buzzPin, 660, 100);
 }
 
 void playSound() {
-    tone(buzzPin, 660, 100);
+  tone(buzzPin, 660, 100);
 	delay(150);
 	tone(buzzPin, 660, 100);
 	delay(300);
@@ -190,4 +232,16 @@ void playSound() {
 	delay(550);
 	tone(buzzPin, 380, 100);
 	delay(575);
+}
+
+void dump_byte_array(byte *buffer, byte bufferSize, char *uidAsString) {
+  char hexTemp[3];
+  uidAsString[0] = '\0';
+  
+  for (byte i = 0; i < bufferSize; i++) {
+    sprintf(hexTemp, "%02X", buffer[i]);
+    strcat(uidAsString, hexTemp);
+    if(i != bufferSize - 1)
+      strcat(uidAsString, ":");
+  }
 }
